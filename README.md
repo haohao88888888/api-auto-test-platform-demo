@@ -6,10 +6,10 @@
 
 ## 当前运行结果
 
-- `pytest -q`：11 个测试全部通过。
+- `pytest -q`：13 个测试全部通过。
 - `python run_tests.py`：接口用例 `11/11` 通过，失败 0，跳过 0，通过率 100%。
 - 本地报告：`reports/report.html`、`reports/report.json`。
-- 最近一次端到端执行平均接口耗时约 `1.67 ms`。
+- 最近一次端到端执行平均接口耗时约 `1.63 ms`。
 
 ## 能力点
 
@@ -17,6 +17,8 @@
 - 使用 JSON 描述测试用例，支持状态码、JSON Path、文本包含、响应时间断言。
 - 支持从响应中提取变量，例如从登录接口提取 `data.token`。
 - 支持 `${token}`、`${alice_user_id}` 形式的变量注入，串联登录后的鉴权请求。
+- 当整个字段就是 `${alice_user_id}` 时保留原始类型，例如 `int` 不会被强制转成字符串。
+- 只有断言和变量提取全部通过后，才会把变量写入共享上下文，避免失败用例污染后续链路。
 - 覆盖成功路径、错误密码、缺少 token、错误 token、越权访问、缺少参数、请求 schema 错误等场景。
 - 对用例文件做 schema 校验，避免空用例或错误断言导致“假通过”。
 - 使用 pytest 覆盖断言逻辑、用例加载、变量替换和鉴权边界。
@@ -50,6 +52,11 @@
 "headers": {"Authorization": "Bearer ${token}"}
 ```
 
+执行器还有两个工程细节：
+
+- 如果字段完整等于 `${alice_user_id}`，替换结果保留 `int` 类型；如果是 `/users/${alice_user_id}` 这种拼接字符串，则替换为字符串片段。
+- 只有当前用例所有断言和提取动作都成功，变量才会进入共享上下文，避免失败登录接口提取出的错误 token 影响后续用例。
+
 ### 3. 增加用例校验和 CI
 
 `runner/schema.py` 会校验用例必须包含 `id`、`path`、非空 `assertions`，并校验断言类型是否合法。项目还补充了 `.github/workflows/python-tests.yml`，用于在 GitHub 上自动跑 pytest。
@@ -62,6 +69,8 @@ api-auto-test-platform-demo/
     main.py
   cases/
     api_cases.json
+  docs/
+    interview_guide.md
   runner/
     assertions.py
     executor.py
@@ -110,6 +119,8 @@ pytest -q
 我从 0 搭了一个轻量接口自动化测试项目，先用 FastAPI 做被测服务，再用 requests 实现 JSON 驱动的测试执行器。最开始项目只能跑成功路径，后来我在自测时发现一个真实的越权问题：只校验 token 有效性，没有校验 token 用户和请求用户是否一致。于是我补了 403 鉴权逻辑、负向用例和 pytest 回归测试。
 
 项目里比较关键的工程点是变量提取和注入：登录接口返回 token 后，执行器会从 `data.token` 提取变量，后续接口通过 `${token}` 自动复用，避免写死 token。除此之外，我还给用例文件加了 schema 校验，防止空用例或错误断言生成看似正常的报告。
+
+后续升级时我又修了一个执行器细节：最开始提取变量后会立即写入全局上下文，后来发现如果断言失败但提取成功，可能污染后续用例。所以我调整为“断言和提取都通过才提交变量”，并补了单元测试。同时变量替换也支持整段占位符保留类型，方便以后 JSON body 里注入数字或布尔值。
 
 ## 简历写法
 

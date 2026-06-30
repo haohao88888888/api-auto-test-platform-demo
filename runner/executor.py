@@ -10,6 +10,7 @@ from runner.schema import validate_cases
 
 
 VARIABLE_PATTERN = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
+WHOLE_VARIABLE_PATTERN = re.compile(r"^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$")
 
 
 def load_cases(case_file):
@@ -25,6 +26,13 @@ def build_url(base_url, path):
 
 def substitute_value(value, variables):
     if isinstance(value, str):
+        whole_match = WHOLE_VARIABLE_PATTERN.match(value)
+        if whole_match:
+            name = whole_match.group(1)
+            if name not in variables:
+                raise KeyError(f"variable {name!r} was not extracted")
+            return variables[name]
+
         def replace(match):
             name = match.group(1)
             if name not in variables:
@@ -127,8 +135,9 @@ def run_case(session, base_url, case, timeout, variables):
             prepared_case.get("extract", []),
         )
         checks.extend(extract_checks)
-        variables.update(extracted)
         passed = all(check["passed"] for check in checks)
+        if passed:
+            variables.update(extracted)
 
         return {
             "id": case.get("id"),

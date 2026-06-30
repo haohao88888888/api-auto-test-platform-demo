@@ -1,6 +1,19 @@
 import json
 
-from runner.executor import load_cases, substitute_value
+from runner.executor import load_cases, run_case, substitute_value
+
+
+class DummyResponse:
+    status_code = 500
+    text = '{"code":0,"data":{"token":"bad-token"}}'
+
+    def json(self):
+        return {"code": 0, "data": {"token": "bad-token"}}
+
+
+class DummySession:
+    def request(self, **kwargs):
+        return DummyResponse()
 
 
 def test_substitute_value_replaces_variables_recursively():
@@ -8,13 +21,47 @@ def test_substitute_value_replaces_variables_recursively():
         "path": "/users/${user_id}",
         "headers": {"Authorization": "Bearer ${token}"},
         "params": [{"owner": "${user_id}"}],
+        "json": {"user_id": "${user_id}", "active": "${active}"},
     }
 
-    resolved = substitute_value(case, {"token": "demo-token-alice", "user_id": 1})
+    resolved = substitute_value(
+        case,
+        {"token": "demo-token-alice", "user_id": 1, "active": True},
+    )
 
     assert resolved["path"] == "/users/1"
     assert resolved["headers"]["Authorization"] == "Bearer demo-token-alice"
-    assert resolved["params"][0]["owner"] == "1"
+    assert resolved["params"][0]["owner"] == 1
+    assert resolved["json"]["user_id"] == 1
+    assert resolved["json"]["active"] is True
+
+
+def test_substitute_value_embedded_placeholder_becomes_string():
+    resolved = substitute_value(
+        {"header": "Bearer ${token}", "path": "/users/${user_id}"},
+        {"token": "demo-token-alice", "user_id": 1},
+    )
+
+    assert resolved["header"] == "Bearer demo-token-alice"
+    assert resolved["path"] == "/users/1"
+
+
+def test_run_case_does_not_update_variables_when_assertion_fails():
+    variables = {}
+    case = {
+        "id": "failed_login",
+        "name": "Failed login must not publish token",
+        "method": "POST",
+        "path": "/login",
+        "assertions": [{"type": "status_code", "expected": 200}],
+        "extract": [{"name": "token", "path": "data.token"}],
+    }
+
+    result = run_case(DummySession(), "http://example.test", case, 5, variables)
+
+    assert result["passed"] is False
+    assert result["extracted"] == {"token": "bad-token"}
+    assert variables == {}
 
 
 def test_load_cases_rejects_empty_case_file(tmp_path):

@@ -1,0 +1,146 @@
+{
+  "project": "api-auto-test-platform-demo",
+  "version": "0.2.0",
+  "description": "Regression cases covering happy path, auth failure, privilege checks, input validation, token extraction, and variable injection.",
+  "cases": [
+    {
+      "id": "health_check",
+      "name": "Health check should return ok",
+      "method": "GET",
+      "path": "/health",
+      "assertions": [
+        {"type": "status_code", "expected": 200},
+        {"type": "json_equals", "path": "status", "expected": "ok"},
+        {"type": "response_time_lt_ms", "expected": 1000}
+      ]
+    },
+    {
+      "id": "login_success",
+      "name": "Login should return token for valid account",
+      "method": "POST",
+      "path": "/login",
+      "json": {"username": "alice", "password": "123456"},
+      "assertions": [
+        {"type": "status_code", "expected": 200},
+        {"type": "json_equals", "path": "code", "expected": 0},
+        {"type": "json_exists", "path": "data.token"},
+        {"type": "json_equals", "path": "data.user_id", "expected": 1}
+      ],
+      "extract": [
+        {"name": "token", "path": "data.token"},
+        {"name": "alice_user_id", "path": "data.user_id"}
+      ]
+    },
+    {
+      "id": "login_wrong_password",
+      "name": "Login should reject wrong password",
+      "method": "POST",
+      "path": "/login",
+      "json": {"username": "alice", "password": "wrong"},
+      "assertions": [
+        {"type": "status_code", "expected": 401},
+        {"type": "json_equals", "path": "code", "expected": 1001},
+        {"type": "text_contains", "expected": "invalid username or password"}
+      ]
+    },
+    {
+      "id": "login_schema_missing_password",
+      "name": "Login should reject missing password by schema validation",
+      "method": "POST",
+      "path": "/login",
+      "json": {"username": "alice"},
+      "assertions": [
+        {"type": "status_code", "expected": 422},
+        {"type": "json_exists", "path": "detail"}
+      ]
+    },
+    {
+      "id": "get_user_success",
+      "name": "Get own user profile should succeed with extracted token",
+      "method": "GET",
+      "path": "/users/${alice_user_id}",
+      "headers": {"Authorization": "Bearer ${token}"},
+      "depends_on": "login_success",
+      "assertions": [
+        {"type": "status_code", "expected": 200},
+        {"type": "json_equals", "path": "code", "expected": 0},
+        {"type": "json_equals", "path": "data.name", "expected": "Alice"},
+        {"type": "json_contains", "path": "data.email", "expected": "alice@"}
+      ]
+    },
+    {
+      "id": "get_orders_success",
+      "name": "Get own orders should return order list",
+      "method": "GET",
+      "path": "/orders",
+      "headers": {"Authorization": "Bearer ${token}"},
+      "params": {"user_id": "${alice_user_id}"},
+      "depends_on": "login_success",
+      "assertions": [
+        {"type": "status_code", "expected": 200},
+        {"type": "json_equals", "path": "code", "expected": 0},
+        {"type": "json_equals", "path": "data.0.title", "expected": "Keyboard"},
+        {"type": "json_exists", "path": "data.1.amount"}
+      ]
+    },
+    {
+      "id": "get_user_missing_auth",
+      "name": "Get user should reject request without token",
+      "method": "GET",
+      "path": "/users/1",
+      "assertions": [
+        {"type": "status_code", "expected": 401},
+        {"type": "json_equals", "path": "code", "expected": 1002}
+      ]
+    },
+    {
+      "id": "get_user_bad_token",
+      "name": "Get user should reject invalid token",
+      "method": "GET",
+      "path": "/users/1",
+      "headers": {"Authorization": "Bearer bad-token"},
+      "assertions": [
+        {"type": "status_code", "expected": 401},
+        {"type": "json_equals", "path": "code", "expected": 1002}
+      ]
+    },
+    {
+      "id": "get_user_forbidden_other_user",
+      "name": "Alice token must not access Bob profile",
+      "method": "GET",
+      "path": "/users/2",
+      "headers": {"Authorization": "Bearer ${token}"},
+      "depends_on": "login_success",
+      "assertions": [
+        {"type": "status_code", "expected": 403},
+        {"type": "json_equals", "path": "code", "expected": 1004},
+        {"type": "text_contains", "expected": "forbidden"}
+      ]
+    },
+    {
+      "id": "get_orders_forbidden_other_user",
+      "name": "Alice token must not access Bob orders",
+      "method": "GET",
+      "path": "/orders",
+      "headers": {"Authorization": "Bearer ${token}"},
+      "params": {"user_id": 2},
+      "depends_on": "login_success",
+      "assertions": [
+        {"type": "status_code", "expected": 403},
+        {"type": "json_equals", "path": "code", "expected": 1004}
+      ]
+    },
+    {
+      "id": "get_orders_missing_user_id",
+      "name": "Orders should reject missing user_id query parameter",
+      "method": "GET",
+      "path": "/orders",
+      "headers": {"Authorization": "Bearer ${token}"},
+      "depends_on": "login_success",
+      "assertions": [
+        {"type": "status_code", "expected": 422},
+        {"type": "json_exists", "path": "detail"}
+      ]
+    }
+  ]
+}

@@ -1,0 +1,116 @@
+# 接口自动化测试平台 Demo
+
+一个基于 Python / FastAPI / requests / pytest 的轻量接口自动化测试项目。项目包含被测 API 服务、JSON 用例管理、批量执行器、断言引擎、变量提取与注入、HTML/JSON 报告、单元测试和 GitHub Actions CI。
+
+定位：不是完整商业测试平台，而是一个可从 0 讲清楚设计思路、问题排查和工程闭环的微型接口自动化项目。
+
+## 当前运行结果
+
+- `pytest -q`：11 个测试全部通过。
+- `python run_tests.py`：接口用例 `11/11` 通过，失败 0，跳过 0，通过率 100%。
+- 本地报告：`reports/report.html`、`reports/report.json`。
+- 最近一次端到端执行平均接口耗时约 `1.67 ms`。
+
+## 能力点
+
+- 使用 FastAPI 构建被测服务，模拟登录、用户查询、订单查询等接口。
+- 使用 JSON 描述测试用例，支持状态码、JSON Path、文本包含、响应时间断言。
+- 支持从响应中提取变量，例如从登录接口提取 `data.token`。
+- 支持 `${token}`、`${alice_user_id}` 形式的变量注入，串联登录后的鉴权请求。
+- 覆盖成功路径、错误密码、缺少 token、错误 token、越权访问、缺少参数、请求 schema 错误等场景。
+- 对用例文件做 schema 校验，避免空用例或错误断言导致“假通过”。
+- 使用 pytest 覆盖断言逻辑、用例加载、变量替换和鉴权边界。
+- 使用 GitHub Actions 在 push / pull request 时自动执行测试。
+
+## 关键升级
+
+### 1. 修复越权访问漏洞
+
+早期版本只校验 token 是否有效，没有校验 token 所属用户是否等于请求中的 `user_id`。这会导致 Alice 的 token 可以查询 Bob 的资料和订单，属于典型 IDOR / 越权访问问题。
+
+解决方式：
+
+- 在 `/users/{user_id}` 和 `/orders?user_id=` 中增加 subject 校验。
+- token 用户和请求用户不一致时返回 `403`，错误码 `1004`。
+- 新增 pytest 和 JSON 负向用例，防止后续回归。
+
+### 2. 增加变量提取和依赖链路
+
+接口自动化不能每条用例都写死 token，否则登录接口坏了也可能看起来后续接口正常。当前执行器支持：
+
+```json
+"extract": [
+  {"name": "token", "path": "data.token"}
+]
+```
+
+后续用例可以这样使用：
+
+```json
+"headers": {"Authorization": "Bearer ${token}"}
+```
+
+### 3. 增加用例校验和 CI
+
+`runner/schema.py` 会校验用例必须包含 `id`、`path`、非空 `assertions`，并校验断言类型是否合法。项目还补充了 `.github/workflows/python-tests.yml`，用于在 GitHub 上自动跑 pytest。
+
+## 项目结构
+
+```text
+api-auto-test-platform-demo/
+  app/
+    main.py
+  cases/
+    api_cases.json
+  runner/
+    assertions.py
+    executor.py
+    report.py
+    schema.py
+  tests/
+    test_app_auth.py
+    test_assertions.py
+    test_executor.py
+  .github/workflows/
+    python-tests.yml
+  run_tests.py
+  requirements.txt
+```
+
+## 快速运行
+
+```powershell
+cd D:\PycharmProjects\api-auto-test-platform-demo
+python -m venv .venv
+.\.venv\Scripts\activate
+pip install -r requirements.txt
+```
+
+启动被测服务：
+
+```powershell
+uvicorn app.main:app --reload --port 8001
+```
+
+另开一个终端执行接口用例：
+
+```powershell
+cd D:\PycharmProjects\api-auto-test-platform-demo
+python run_tests.py --base-url http://127.0.0.1:8001
+```
+
+执行单元测试：
+
+```powershell
+pytest -q
+```
+
+## 面试说明口径
+
+我从 0 搭了一个轻量接口自动化测试项目，先用 FastAPI 做被测服务，再用 requests 实现 JSON 驱动的测试执行器。最开始项目只能跑成功路径，后来我在自测时发现一个真实的越权问题：只校验 token 有效性，没有校验 token 用户和请求用户是否一致。于是我补了 403 鉴权逻辑、负向用例和 pytest 回归测试。
+
+项目里比较关键的工程点是变量提取和注入：登录接口返回 token 后，执行器会从 `data.token` 提取变量，后续接口通过 `${token}` 自动复用，避免写死 token。除此之外，我还给用例文件加了 schema 校验，防止空用例或错误断言生成看似正常的报告。
+
+## 简历写法
+
+基于 Python / FastAPI / requests 实现接口自动化测试 Demo，支持 JSON 用例管理、批量执行、变量提取与注入、状态码 / JSON Path / 响应时间断言和 HTML/JSON 报告生成；覆盖登录、鉴权、用户查询、订单查询、越权访问和参数异常等 11 条接口用例，并通过 pytest 与 GitHub Actions 保障断言逻辑、执行器和鉴权边界稳定性。

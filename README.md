@@ -6,10 +6,10 @@
 
 ## 当前运行结果
 
-- `pytest -q`：13 个测试全部通过。
+- `pytest -q`：17 个测试全部通过。
 - `python run_tests.py`：接口用例 `11/11` 通过，失败 0，跳过 0，通过率 100%。
 - 本地报告：`reports/report.html`、`reports/report.json`。
-- 最近一次端到端执行平均接口耗时约 `1.63 ms`。
+- 最近一次端到端执行平均接口耗时约 `1.54 ms`。
 
 ## 能力点
 
@@ -20,9 +20,10 @@
 - 当整个字段就是 `${alice_user_id}` 时保留原始类型，例如 `int` 不会被强制转成字符串。
 - 只有断言和变量提取全部通过后，才会把变量写入共享上下文，避免失败用例污染后续链路。
 - 覆盖成功路径、错误密码、缺少 token、错误 token、越权访问、缺少参数、请求 schema 错误等场景。
-- 对用例文件做 schema 校验，避免空用例或错误断言导致“假通过”。
+- 对用例文件做 schema 校验，避免空用例、非法断言、缺失 expected/path、错误依赖导致“假通过”。
+- 报告默认脱敏，遮盖 token、Authorization、password、邮箱、手机号、身份证号等敏感内容。
 - 使用 pytest 覆盖断言逻辑、用例加载、变量替换和鉴权边界。
-- 使用 GitHub Actions 在 push / pull request 时自动执行测试。
+- 使用 GitHub Actions 在 push / pull request 时自动执行 pytest，并启动 FastAPI 跑端到端 JSON 用例，上传报告 artifact。
 
 ## 关键升级
 
@@ -59,7 +60,19 @@
 
 ### 3. 增加用例校验和 CI
 
-`runner/schema.py` 会校验用例必须包含 `id`、`path`、非空 `assertions`，并校验断言类型是否合法。项目还补充了 `.github/workflows/python-tests.yml`，用于在 GitHub 上自动跑 pytest。
+`runner/schema.py` 会校验用例必须包含 `id`、`path`、非空 `assertions`，并校验断言类型是否合法。它还会检查：
+
+- `depends_on` 必须引用前面已经出现过的用例，不能拼错或依赖后面的用例。
+- `status_code` 必须有整数 `expected`。
+- `json_equals/json_contains` 必须有 `path` 和 `expected`。
+- `json_exists` 必须有 `path`。
+- `response_time_lt_ms` 必须有正数阈值。
+
+项目还补充了 `.github/workflows/python-tests.yml`，用于在 GitHub 上自动跑 pytest、启动 FastAPI、执行 `run_tests.py`，并上传 HTML/JSON 报告。
+
+### 4. 增加报告脱敏
+
+报告会被发给面试官或保存在 CI artifact 中，因此不能把 token、Authorization、password、邮箱、手机号、身份证号直接写出去。`runner/redaction.py` 会在写入 HTML/JSON 报告前统一脱敏，既保护页面报告，也保护机器可读报告。
 
 ## 项目结构
 
@@ -118,10 +131,12 @@ pytest -q
 
 我从 0 搭了一个轻量接口自动化测试项目，先用 FastAPI 做被测服务，再用 requests 实现 JSON 驱动的测试执行器。最开始项目只能跑成功路径，后来我在自测时发现一个真实的越权问题：只校验 token 有效性，没有校验 token 用户和请求用户是否一致。于是我补了 403 鉴权逻辑、负向用例和 pytest 回归测试。
 
-项目里比较关键的工程点是变量提取和注入：登录接口返回 token 后，执行器会从 `data.token` 提取变量，后续接口通过 `${token}` 自动复用，避免写死 token。除此之外，我还给用例文件加了 schema 校验，防止空用例或错误断言生成看似正常的报告。
+项目里比较关键的工程点是变量提取和注入：登录接口返回 token 后，执行器会从 `data.token` 提取变量，后续接口通过 `${token}` 自动复用，避免写死 token。除此之外，我还给用例文件加了 schema 校验，防止空用例、错误断言或拼错依赖生成看似正常的报告。
 
 后续升级时我又修了一个执行器细节：最开始提取变量后会立即写入全局上下文，后来发现如果断言失败但提取成功，可能污染后续用例。所以我调整为“断言和提取都通过才提交变量”，并补了单元测试。同时变量替换也支持整段占位符保留类型，方便以后 JSON body 里注入数字或布尔值。
 
+再后面我补了报告脱敏和端到端 CI：报告写入前会遮盖 token、Authorization、邮箱、手机号等敏感信息；GitHub Actions 会启动 FastAPI 并执行 JSON 用例，证明“被测服务 + 执行器 + 报告”整条链路能跑通。
+
 ## 简历写法
 
-基于 Python / FastAPI / requests 实现接口自动化测试 Demo，支持 JSON 用例管理、批量执行、变量提取与注入、状态码 / JSON Path / 响应时间断言和 HTML/JSON 报告生成；覆盖登录、鉴权、用户查询、订单查询、越权访问和参数异常等 11 条接口用例，并通过 pytest 与 GitHub Actions 保障断言逻辑、执行器和鉴权边界稳定性。
+基于 Python / FastAPI / requests 实现接口自动化测试 Demo，支持 JSON 用例管理、批量执行、变量提取与注入、状态码 / JSON Path / 响应时间断言、用例 schema 校验和 HTML/JSON 脱敏报告生成；覆盖登录、鉴权、用户查询、订单查询、越权访问和参数异常等 11 条接口用例，并通过 17 个 pytest 单测与 GitHub Actions 端到端链路验证保障执行器和鉴权边界稳定性。

@@ -23,3 +23,32 @@ jobs:
 
       - name: Run pytest
         run: pytest -q
+
+      - name: Run API end-to-end cases
+        run: |
+          python -m uvicorn app.main:app --host 127.0.0.1 --port 8001 > uvicorn.log 2>&1 &
+          python - <<'PY'
+          import time
+          import requests
+
+          for _ in range(30):
+              try:
+                  response = requests.get("http://127.0.0.1:8001/health", timeout=1)
+                  if response.status_code == 200:
+                      break
+              except requests.RequestException:
+                  time.sleep(0.5)
+          else:
+              raise SystemExit("API service did not become ready")
+          PY
+          python run_tests.py --base-url http://127.0.0.1:8001
+
+      - name: Upload API reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: api-test-reports
+          path: |
+            reports/report.html
+            reports/report.json
+            uvicorn.log

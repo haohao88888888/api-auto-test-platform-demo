@@ -2,6 +2,8 @@ import html
 import json
 from pathlib import Path
 
+from runner.redaction import redact_results, redact_text
+
 
 def build_summary(results):
     total = len(results)
@@ -26,15 +28,17 @@ def build_summary(results):
 
 def check_messages(result):
     if result.get("error"):
-        return html.escape(result["error"])
+        return html.escape(redact_text(result["error"]))
 
     messages = []
     for check in result.get("checks", []):
         status = "PASS" if check["passed"] else "FAIL"
-        message = html.escape(check["message"])
+        message = html.escape(redact_text(check["message"]))
         messages.append(f"[{status}] {html.escape(check['type'])}: {message}")
     for name, value in result.get("extracted", {}).items():
-        messages.append(f"[EXTRACTED] {html.escape(name)}={html.escape(str(value))}")
+        messages.append(
+            f"[EXTRACTED] {html.escape(name)}={html.escape(redact_text(value))}"
+        )
     return "<br>".join(messages)
 
 
@@ -114,13 +118,14 @@ def write_reports(results, report_dir):
     output_dir = Path(report_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    safe_results = redact_results(results)
     summary = build_summary(results)
-    payload = {"summary": summary, "results": results}
+    payload = {"summary": summary, "results": safe_results}
 
     json_path = output_dir / "report.json"
     html_path = output_dir / "report.html"
 
     json_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
-    html_path.write_text(build_html(results, summary), encoding="utf-8")
+    html_path.write_text(build_html(safe_results, summary), encoding="utf-8")
 
     return {"summary": summary, "json": str(json_path), "html": str(html_path)}

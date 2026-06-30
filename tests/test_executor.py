@@ -96,3 +96,54 @@ def test_load_cases_rejects_unknown_assertion(tmp_path):
         assert "unsupported assertion type" in str(exc)
     else:
         raise AssertionError("unknown assertion should be rejected")
+
+
+def test_load_cases_rejects_missing_assertion_fields(tmp_path):
+    payload = {
+        "cases": [
+            {
+                "id": "bad_status_assertion",
+                "method": "GET",
+                "path": "/health",
+                "assertions": [{"type": "status_code"}],
+            }
+        ]
+    }
+    case_file = tmp_path / "missing_expected.json"
+    case_file.write_text(json.dumps(payload), encoding="utf-8")
+
+    try:
+        load_cases(case_file)
+    except ValueError as exc:
+        assert "expected integer is required" in str(exc)
+    else:
+        raise AssertionError("status_code assertion without expected should be rejected")
+
+
+def test_load_cases_rejects_dependency_on_later_case(tmp_path):
+    payload = {
+        "cases": [
+            {
+                "id": "get_user",
+                "method": "GET",
+                "path": "/users/1",
+                "depends_on": "login_success",
+                "assertions": [{"type": "status_code", "expected": 200}],
+            },
+            {
+                "id": "login_success",
+                "method": "POST",
+                "path": "/login",
+                "assertions": [{"type": "status_code", "expected": 200}],
+            },
+        ]
+    }
+    case_file = tmp_path / "bad_dependency.json"
+    case_file.write_text(json.dumps(payload), encoding="utf-8")
+
+    try:
+        load_cases(case_file)
+    except ValueError as exc:
+        assert "must reference an earlier case id" in str(exc)
+    else:
+        raise AssertionError("dependency on a later case should be rejected")
